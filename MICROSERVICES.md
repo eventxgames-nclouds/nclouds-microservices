@@ -1,10 +1,46 @@
-# EventXGames Microservices Mapping
+# EventXGames Microservices Specifications
 
-## Service Specifications
+Detailed specifications for all 16 application microservices running in Amazon EKS.
 
-### 1. API Worker
+---
+
+## Core Services
+
+### W-01: Frontend Service
+
+**Purpose:** Web application UI serving the EventXGames platform
+
+**Technology:** Next.js 14
+
+**Current (Azure):**
+- Docker container serving React/Next.js application
+
+**Target (AWS):**
+```yaml
+Deployment: frontend-service
+Namespace: eventxgames
+Replicas: 3 (min) - 15 (max)
+Resources:
+  Requests:
+    CPU: 250m
+    Memory: 512Mi
+  Limits:
+    CPU: 1000m
+    Memory: 2Gi
+HPA:
+  Target: 60% CPU utilization
+Health Checks:
+  Readiness: GET /health (port 3000)
+  Liveness: GET /health (port 3000)
+```
+
+---
+
+### W-02: API Service
 
 **Purpose:** Core API backend handling all business logic and data operations
+
+**Technology:** Fastify/Node.js
 
 **Current (Azure):**
 - Docker container on Azure VPS
@@ -12,7 +48,7 @@
 
 **Target (AWS):**
 ```yaml
-Deployment: api-worker
+Deployment: api-service
 Namespace: eventxgames
 Replicas: 3 (min) - 20 (max)
 Resources:
@@ -35,71 +71,46 @@ Health Checks:
 
 ---
 
-### 2. Frontend Worker
+## Game Generation Workers
 
-**Purpose:** Serves web application and static assets
+### W-03: Game Generation Orchestrator
 
-**Current (Azure):**
-- Docker container serving React/Next.js application
+**Purpose:** Coordinates game creation workflow across multiple services
 
-**Target (AWS):**
-```yaml
-Deployment: frontend-worker
-Namespace: eventxgames
-Replicas: 3 (min) - 15 (max)
-Resources:
-  Requests:
-    CPU: 250m
-    Memory: 512Mi
-  Limits:
-    CPU: 1000m
-    Memory: 2Gi
-HPA:
-  Target: 60% CPU utilization
-```
-
----
-
-### 3. Game Worker
-
-**Purpose:** Handles game session management, real-time game logic, and player state
-
-**Current (Azure):**
-- Stateful Docker containers with Redis for session state
+**Technology:** Node.js
 
 **Target (AWS):**
 ```yaml
-Deployment: game-worker
+Deployment: game-orchestrator
 Namespace: eventxgames
-Replicas: 5 (min) - 50 (max)
+Replicas: 3 (min) - 30 (max)
 Resources:
   Requests:
-    CPU: 1000m
-    Memory: 2Gi
+    CPU: 500m
+    Memory: 1Gi
   Limits:
-    CPU: 4000m
-    Memory: 8Gi
+    CPU: 2000m
+    Memory: 4Gi
 HPA:
-  Metrics:
-    - CPU: 65% utilization
-    - Custom: active_game_sessions (avg 100 per pod)
+  Target: 70% CPU utilization
 Environment:
-  - REDIS_URL: from Secrets Manager
+  - BEDROCK_MODEL: anthropic.claude-3-sonnet
+  - SQS_QUEUE_URL: from ConfigMap
 ```
 
-**Special Considerations:**
-- High memory for game state caching
-- Custom metrics for session-based scaling
-- Session affinity for active games
+**Responsibilities:**
+- Receive game generation requests
+- Coordinate with Content, Asset, and Audio services
+- Manage generation state machine
+- Handle retries and error recovery
 
 ---
 
-### 4. Asset Worker
+### W-04: Asset Worker
 
-**Purpose:** Processes and transforms game assets (images, audio, video)
+**Purpose:** Processes and transforms game assets (images, graphics)
 
-**Current (Azure):**
-- Background processing container
+**Technology:** Node.js + Sharp/Canvas
 
 **Target (AWS):**
 ```yaml
@@ -128,12 +139,11 @@ Tolerations:
 
 ---
 
-### 5. Chat Worker
+### W-05: Chat Worker
 
 **Purpose:** Real-time chat and WebSocket connections
 
-**Current (Azure):**
-- WebSocket-enabled container
+**Technology:** Node.js + Socket.io
 
 **Target (AWS):**
 ```yaml
@@ -163,54 +173,444 @@ HPA:
 
 ---
 
+## Content & Templates
+
+### W-06: Content Generation Service
+
+**Purpose:** Generates trivia questions, stories, and game narratives using AI
+
+**Technology:** Node.js + AWS Bedrock (Claude)
+
+**Target (AWS):**
+```yaml
+Deployment: content-generator
+Namespace: eventxgames
+Replicas: 2 (min) - 15 (max)
+Resources:
+  Requests:
+    CPU: 500m
+    Memory: 1Gi
+  Limits:
+    CPU: 2000m
+    Memory: 4Gi
+HPA:
+  Target: 70% CPU utilization
+Environment:
+  - BEDROCK_MODEL: anthropic.claude-3-sonnet
+  - CONTENT_CACHE_TTL: 3600
+```
+
+**Capabilities:**
+- Trivia question generation (multiple categories)
+- Story/narrative generation
+- Quiz content creation
+- Content validation and filtering
+
+---
+
+### W-07: Template Service
+
+**Purpose:** Manages game templates and configurations
+
+**Technology:** Node.js
+
+**Target (AWS):**
+```yaml
+Deployment: template-service
+Namespace: eventxgames
+Replicas: 2 (min) - 8 (max)
+Resources:
+  Requests:
+    CPU: 250m
+    Memory: 512Mi
+  Limits:
+    CPU: 1000m
+    Memory: 2Gi
+HPA:
+  Target: 70% CPU utilization
+```
+
+**Game Categories Supported:**
+- Trivia
+- Quiz
+- Arcade
+- Puzzle
+- Memory
+- Spin-wheel
+
+---
+
+### W-08: Audio Generation Service
+
+**Purpose:** Generates and processes sound effects and music
+
+**Technology:** Node.js
+
+**Target (AWS):**
+```yaml
+Deployment: audio-generator
+Namespace: eventxgames
+Replicas: 1 (min) - 5 (max)
+Resources:
+  Requests:
+    CPU: 500m
+    Memory: 1Gi
+  Limits:
+    CPU: 2000m
+    Memory: 4Gi
+HPA:
+  Target: 70% CPU utilization
+Node Selection:
+  role: spot-workloads
+```
+
+**Capabilities:**
+- Sound effect selection
+- Background music management
+- Audio format conversion
+- Volume normalization
+
+---
+
+## Runtime Services (100K Players)
+
+### W-09: Leaderboard Service
+
+**Purpose:** Manages real-time player rankings and scores
+
+**Technology:** Node.js + DynamoDB
+
+**Target (AWS):**
+```yaml
+Deployment: leaderboard-service
+Namespace: eventxgames
+Replicas: 3 (min) - 20 (max)
+Resources:
+  Requests:
+    CPU: 500m
+    Memory: 1Gi
+  Limits:
+    CPU: 2000m
+    Memory: 4Gi
+HPA:
+  Metrics:
+    - CPU: 70% utilization
+    - Custom: requests_per_second (avg 500 per pod)
+```
+
+**Features:**
+- Real-time score updates
+- Global and per-game leaderboards
+- Time-based rankings (daily, weekly, all-time)
+- DynamoDB for low-latency reads
+
+---
+
+### W-10: Player Session Service
+
+**Purpose:** Manages 100K concurrent player sessions
+
+**Technology:** Node.js + ElastiCache Redis
+
+**Target (AWS):**
+```yaml
+Deployment: player-session-service
+Namespace: eventxgames
+Replicas: 5 (min) - 50 (max)
+Resources:
+  Requests:
+    CPU: 1000m
+    Memory: 2Gi
+  Limits:
+    CPU: 4000m
+    Memory: 8Gi
+HPA:
+  Metrics:
+    - CPU: 65% utilization
+    - Custom: active_sessions (avg 2000 per pod)
+Environment:
+  - REDIS_CLUSTER_URL: from Secrets Manager
+```
+
+**Scale Targets:**
+- 100K concurrent players
+- Sub-100ms session lookup
+- Session affinity for active games
+
+---
+
+### W-11: Analytics Service
+
+**Purpose:** Collects and processes player behavior and game metrics
+
+**Technology:** Node.js + SQS
+
+**Target (AWS):**
+```yaml
+Deployment: analytics-service
+Namespace: eventxgames
+Replicas: 2 (min) - 10 (max)
+Resources:
+  Requests:
+    CPU: 500m
+    Memory: 1Gi
+  Limits:
+    CPU: 2000m
+    Memory: 4Gi
+HPA:
+  Target: 70% CPU utilization
+Environment:
+  - SQS_QUEUE: eventx-analytics
+  - KINESIS_STREAM: eventx-events
+```
+
+**Metrics Collected:**
+- Player engagement
+- Game completion rates
+- Lead qualification data
+- Post-event analytics
+
+---
+
+## Support Services
+
+### W-12: Localization Service
+
+**Purpose:** Provides multi-language support using AI translation
+
+**Technology:** Node.js + AWS Bedrock (Claude Sonnet)
+
+**Target (AWS):**
+```yaml
+Deployment: localization-service
+Namespace: eventxgames
+Replicas: 2 (min) - 8 (max)
+Resources:
+  Requests:
+    CPU: 500m
+    Memory: 1Gi
+  Limits:
+    CPU: 2000m
+    Memory: 4Gi
+HPA:
+  Target: 70% CPU utilization
+Environment:
+  - BEDROCK_MODEL: anthropic.claude-3-sonnet
+  - TRANSLATION_CACHE_TTL: 86400
+```
+
+**Supported Languages:**
+- Dynamic translation via Claude Sonnet
+- Translation caching for performance
+- RTL language support
+
+---
+
+### W-13: Notification Service
+
+**Purpose:** Handles email and push notifications
+
+**Technology:** Node.js + SNS
+
+**Target (AWS):**
+```yaml
+Deployment: notification-service
+Namespace: eventxgames
+Replicas: 2 (min) - 8 (max)
+Resources:
+  Requests:
+    CPU: 250m
+    Memory: 512Mi
+  Limits:
+    CPU: 1000m
+    Memory: 2Gi
+HPA:
+  Target: 70% CPU utilization
+Environment:
+  - SNS_TOPIC: eventx-notifications
+  - SES_SENDER: noreply@eventxgames.com
+```
+
+**Channels:**
+- Email (via SES/ZeptoMail)
+- Push notifications (via SNS)
+- In-app notifications
+
+---
+
+### W-14: Preview Service
+
+**Purpose:** Provides game preview and QA functionality
+
+**Technology:** Node.js
+
+**Target (AWS):**
+```yaml
+Deployment: preview-service
+Namespace: eventxgames
+Replicas: 2 (min) - 6 (max)
+Resources:
+  Requests:
+    CPU: 500m
+    Memory: 1Gi
+  Limits:
+    CPU: 2000m
+    Memory: 4Gi
+HPA:
+  Target: 70% CPU utilization
+```
+
+**Features:**
+- Game preview rendering
+- QA testing tools
+- Screenshot generation
+- Preview link generation
+
+---
+
+### W-15: Export Service
+
+**Purpose:** Handles game export for self-hosting (ZIP download, embed code)
+
+**Technology:** Node.js + S3
+
+**Target (AWS):**
+```yaml
+Deployment: export-service
+Namespace: eventxgames
+Replicas: 2 (min) - 8 (max)
+Resources:
+  Requests:
+    CPU: 500m
+    Memory: 1Gi
+  Limits:
+    CPU: 2000m
+    Memory: 4Gi
+HPA:
+  Target: 70% CPU utilization
+Environment:
+  - S3_EXPORT_BUCKET: eventxgames-exports
+```
+
+**Export Formats:**
+- ZIP package for self-hosting
+- Embed code (iframe)
+- Standalone HTML
+
+---
+
+### W-16: Webhook Service
+
+**Purpose:** Manages third-party integrations and callbacks
+
+**Technology:** Node.js
+
+**Target (AWS):**
+```yaml
+Deployment: webhook-service
+Namespace: eventxgames
+Replicas: 2 (min) - 8 (max)
+Resources:
+  Requests:
+    CPU: 250m
+    Memory: 512Mi
+  Limits:
+    CPU: 1000m
+    Memory: 2Gi
+HPA:
+  Target: 70% CPU utilization
+```
+
+**Features:**
+- Outbound webhooks for events
+- Retry logic with exponential backoff
+- Webhook signature verification
+- Rate limiting per client
+
+---
+
 ## Service Dependencies
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      External Traffic                        │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Application Load Balancer                 │
-└─────────────────────────────────────────────────────────────┘
-                              │
-        ┌─────────────────────┼─────────────────────┐
-        │                     │                     │
-        ▼                     ▼                     ▼
-┌───────────────┐     ┌───────────────┐     ┌───────────────┐
-│  API Worker   │────▶│  Game Worker  │────▶│  Chat Worker  │
-└───────────────┘     └───────────────┘     └───────────────┘
-        │                     │                     │
-        └─────────────────────┼─────────────────────┘
-                              │
-        ┌─────────────────────┼─────────────────────┐
-        │                     │                     │
-        ▼                     ▼                     ▼
-┌───────────────┐     ┌───────────────┐     ┌───────────────┐
-│    Aurora     │     │  ElastiCache  │     │   Bedrock     │
-│  PostgreSQL   │     │    Redis      │     │   (Claude)    │
-└───────────────┘     └───────────────┘     └───────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                         External Traffic                              │
+└───────────────────────────────────┬─────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    CloudFront + ALB                                   │
+└───────────────────────────────────┬─────────────────────────────────┘
+                                    │
+        ┌───────────────────────────┼───────────────────────┐
+        │                           │                       │
+        ▼                           ▼                       ▼
+┌───────────────┐           ┌───────────────┐       ┌───────────────┐
+│   Frontend    │           │  API Service  │       │  Chat Worker  │
+│   Service     │           │               │       │  (WebSocket)  │
+└───────────────┘           └───────┬───────┘       └───────────────┘
+                                    │
+        ┌───────────────────────────┼───────────────────────┐
+        │                           │                       │
+        ▼                           ▼                       ▼
+┌───────────────┐           ┌───────────────┐       ┌───────────────┐
+│     Game      │           │   Content     │       │  Leaderboard  │
+│  Orchestrator │           │  Generator    │       │   Service     │
+└───────┬───────┘           └───────────────┘       └───────────────┘
+        │
+        ├───────────────────────────┬───────────────────────┐
+        │                           │                       │
+        ▼                           ▼                       ▼
+┌───────────────┐           ┌───────────────┐       ┌───────────────┐
+│ Asset Worker  │           │   Template    │       │    Audio      │
+│               │           │   Service     │       │   Generator   │
+└───────────────┘           └───────────────┘       └───────────────┘
+                                    │
+        ┌───────────────────────────┼───────────────────────┐
+        │                           │                       │
+        ▼                           ▼                       ▼
+┌───────────────┐           ┌───────────────┐       ┌───────────────┐
+│    Aurora     │           │  ElastiCache  │       │   DynamoDB    │
+│  PostgreSQL   │           │    Redis      │       │               │
+└───────────────┘           └───────────────┘       └───────────────┘
 ```
+
+---
 
 ## Database Access Patterns
 
-| Service | Aurora (Read) | Aurora (Write) | Redis |
-|---------|--------------|----------------|-------|
-| API Worker | Yes | Yes | Yes |
-| Frontend Worker | No | No | Yes (cache) |
-| Game Worker | Yes | Limited | Yes |
-| Asset Worker | Yes | Yes | No |
-| Chat Worker | Limited | No | Yes |
+| Service | Aurora (Read) | Aurora (Write) | Redis | DynamoDB |
+|---------|--------------|----------------|-------|----------|
+| Frontend Service | No | No | Yes (cache) | No |
+| API Service | Yes | Yes | Yes | No |
+| Game Orchestrator | Yes | Yes | Yes | No |
+| Asset Worker | Yes | Yes | No | No |
+| Chat Worker | Limited | No | Yes | No |
+| Content Generator | Yes | Yes | Yes | No |
+| Template Service | Yes | Yes | Yes | No |
+| Audio Generator | Yes | Yes | No | No |
+| Leaderboard Service | No | No | Yes | Yes |
+| Player Session Service | Limited | No | Yes | No |
+| Analytics Service | Yes | Yes | No | No |
+| Localization Service | Yes | Yes | Yes | No |
+| Notification Service | Yes | No | No | No |
+| Preview Service | Yes | No | Yes | No |
+| Export Service | Yes | No | No | No |
+| Webhook Service | Yes | Yes | No | No |
+
+---
 
 ## Redis Key Prefixes by Service
 
 | Service | Key Prefix | Purpose |
 |---------|------------|---------|
-| API Worker | `session:`, `cache:` | User sessions, data cache |
-| Game Worker | `game:`, `lb:` | Game state, leaderboards |
-| Chat Worker | `pubsub:` | Real-time messaging |
+| API Service | `session:`, `cache:` | User sessions, data cache |
+| Game Orchestrator | `game:`, `job:` | Game state, job tracking |
+| Chat Worker | `pubsub:`, `ws:` | Real-time messaging |
+| Leaderboard Service | `lb:` | Leaderboard caches |
+| Player Session Service | `player:` | Player session data |
 | All Services | `rate:` | Rate limiting |
+
+---
 
 ## Migration Strategy
 
@@ -218,7 +618,17 @@ All services will be migrated using the **Replatform** strategy:
 
 1. Containerize with EKS-compatible manifests
 2. Configure IRSA for AWS service access
-3. Update connection strings for Aurora/ElastiCache
+3. Update connection strings for Aurora/ElastiCache/DynamoDB
 4. Deploy to staging EKS cluster
 5. Run integration tests
 6. Cutover with traffic shifting
+
+### Migration Phases
+
+| Phase | Services | Timeline |
+|-------|----------|----------|
+| Phase 1 | Frontend, API Service | Week 1-2 |
+| Phase 2 | Game Orchestrator, Asset Worker, Chat Worker | Week 3-4 |
+| Phase 3 | Content Generator, Template, Audio | Week 5-6 |
+| Phase 4 | Leaderboard, Player Session, Analytics | Week 7-8 |
+| Phase 5 | Localization, Notification, Preview, Export, Webhook | Week 9-10 |

@@ -7,58 +7,111 @@ This repository documents the complete EventXGames service architecture for the 
 ```
 EVENTXGAMES SERVICE INVENTORY
 ─────────────────────────────────────────
-Application Microservices:     5  (EKS workloads)
+Application Microservices:    16  (EKS workloads)
 AWS Infrastructure Services:  16  (managed services)
 External SaaS Services:        3  (third-party)
 AI Agent Tools:               20  (software tools)
 ─────────────────────────────────────────
-Total Components:             44
+Total Components:             55
 ```
 
-> **Note:** Only the 5 Application Microservices are actual containerized workloads running in EKS. AWS Infrastructure Services are managed services, not application code.
+> **Note:** Application Microservices are containerized workloads running in EKS. AWS Infrastructure Services are managed services, not application code.
 
 ## Contents
 
-- [MICROSERVICES.md](./MICROSERVICES.md) - Detailed specifications for the 5 EKS workloads
+- [MICROSERVICES.md](./MICROSERVICES.md) - Detailed specifications for all 16 EKS workloads
 
 ---
 
-## 1. Application Microservices (5 total)
+## 1. Application Microservices (16 total)
 
-These are the containerized workloads that run in Amazon EKS:
+### Architecture Overview
 
-| ID | Service | Technology | Status | Scaling |
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    EKS APPLICATION MICROSERVICES                     │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  CORE SERVICES (Existing)                                           │
+│  ┌──────────────┐  ┌──────────────┐                                │
+│  │   Frontend   │  │  API Service │                                │
+│  │   (Next.js)  │  │  (Fastify)   │                                │
+│  └──────────────┘  └──────────────┘                                │
+│                                                                      │
+│  GAME GENERATION WORKERS                                            │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │
+│  │    Game      │  │    Asset     │  │    Chat      │             │
+│  │ Orchestrator │  │   Worker     │  │   Worker     │             │
+│  └──────────────┘  └──────────────┘  └──────────────┘             │
+│                                                                      │
+│  CONTENT & TEMPLATES                                                │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │
+│  │   Content    │  │   Template   │  │   Audio      │             │
+│  │  Generator   │  │   Service    │  │  Generator   │             │
+│  └──────────────┘  └──────────────┘  └──────────────┘             │
+│                                                                      │
+│  RUNTIME SERVICES (100K Players)                                    │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │
+│  │ Leaderboard  │  │   Player     │  │  Analytics   │             │
+│  │   Service    │  │  Sessions    │  │   Service    │             │
+│  └──────────────┘  └──────────────┘  └──────────────┘             │
+│                                                                      │
+│  SUPPORT SERVICES                                                   │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │
+│  │ Localization │  │ Notification │  │   Preview    │             │
+│  │   Service    │  │   Service    │  │   Service    │             │
+│  └──────────────┘  └──────────────┘  └──────────────┘             │
+│                                                                      │
+│  ┌──────────────┐  ┌──────────────┐                                │
+│  │   Export     │  │   Webhook    │                                │
+│  │   Service    │  │   Service    │                                │
+│  └──────────────┘  └──────────────┘                                │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Complete Microservices List
+
+#### Core Services (Existing)
+
+| ID | Service | Technology | Status | Purpose |
 |----|---------|------------|--------|---------|
-| W-01 | Frontend Service | Next.js 14 | Existing | CPU-based (60%) |
-| W-02 | API Service | Fastify/Node.js | Existing | CPU-based (70%) |
-| W-03 | Game Worker | Node.js | Existing | CPU + custom metrics |
-| W-04 | Asset Worker | Node.js | Existing | CPU-based (spot) |
-| W-05 | Chat Worker | Node.js | Existing | Memory + connections |
+| W-01 | Frontend Service | Next.js 14 | Existing | Web application UI |
+| W-02 | API Service | Fastify/Node.js | Existing | Core API backend |
 
-### Architecture Diagram
+#### Game Generation Workers (Planned)
 
-```
-                    ┌─────────────┐
-                    │     ALB     │
-                    └──────┬──────┘
-                           │
-        ┌──────────────────┼──────────────────┐
-        │                  │                  │
-        ▼                  ▼                  ▼
-┌───────────────┐  ┌───────────────┐  ┌───────────────┐
-│  API Worker   │  │Frontend Worker│  │  Game Worker  │
-│  (3-20 pods)  │  │  (3-15 pods)  │  │  (5-50 pods)  │
-└───────┬───────┘  └───────────────┘  └───────┬───────┘
-        │                                      │
-        └──────────────────┬───────────────────┘
-                           │
-              ┌────────────┴────────────┐
-              │                         │
-              ▼                         ▼
-    ┌─────────────────┐       ┌─────────────────┐
-    │ Aurora PostgreSQL│       │ ElastiCache Redis│
-    └─────────────────┘       └─────────────────┘
-```
+| ID | Service | Technology | Status | Purpose |
+|----|---------|------------|--------|---------|
+| W-03 | Game Orchestrator | Node.js | Planned | Game generation coordination |
+| W-04 | Asset Worker | Node.js | Planned | Image/asset processing |
+| W-05 | Chat Worker | Node.js | Planned | Real-time chat/WebSocket |
+
+#### Content & Templates (Planned)
+
+| ID | Service | Technology | Status | Purpose |
+|----|---------|------------|--------|---------|
+| W-06 | Content Generator | Node.js + Bedrock | Planned | Trivia, stories, narratives |
+| W-07 | Template Service | Node.js | Planned | Game template management |
+| W-08 | Audio Generator | Node.js | Planned | Sound effects, music |
+
+#### Runtime Services - 100K Players (Planned)
+
+| ID | Service | Technology | Status | Purpose |
+|----|---------|------------|--------|---------|
+| W-09 | Leaderboard Service | Node.js + DynamoDB | Planned | Real-time player rankings |
+| W-10 | Player Session Service | Node.js + Redis | Planned | 100K concurrent player management |
+| W-11 | Analytics Service | Node.js + SQS | Planned | Player behavior, game metrics |
+
+#### Support Services (Planned)
+
+| ID | Service | Technology | Status | Purpose |
+|----|---------|------------|--------|---------|
+| W-12 | Localization Service | Node.js + Bedrock | Planned | Multi-language support |
+| W-13 | Notification Service | Node.js + SNS | Planned | Email/push notifications |
+| W-14 | Preview Service | Node.js | Planned | Game preview/QA |
+| W-15 | Export Service | Node.js + S3 | Planned | Download ZIP, embed code |
+| W-16 | Webhook Service | Node.js | Planned | Third-party integrations |
 
 ---
 
@@ -119,16 +172,63 @@ These are AWS managed services, NOT application microservices:
 | ID | Service | Purpose |
 |----|---------|---------|
 | A-14 | CloudWatch | Logging and monitoring |
-| A-15 | Amazon SQS | Message queuing |
-| A-16 | SNS | Push notifications |
+| A-15 | Amazon SQS | Message queuing (eventx-analytics) |
+| A-16 | SNS | Push notifications (eventx-notifications) |
 
 ---
 
 ## 4. AI Agent Tools (20 total)
 
-Software tools used by the AI orchestrator for game generation and platform operations. These are documented separately in the AI Platform repository.
+Software tools used by the AI orchestrator for game generation and platform operations.
 
 See: [nclouds-ai-platform](https://github.com/eventxgames-nclouds/nclouds-ai-platform)
+
+---
+
+## Service Dependencies
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         External Traffic                              │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    CloudFront + ALB                                   │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+        ┌───────────────────────┼───────────────────────┐
+        │                       │                       │
+        ▼                       ▼                       ▼
+┌───────────────┐       ┌───────────────┐       ┌───────────────┐
+│   Frontend    │       │  API Service  │       │  Chat Worker  │
+│   Service     │       │               │       │  (WebSocket)  │
+└───────────────┘       └───────┬───────┘       └───────────────┘
+                                │
+        ┌───────────────────────┼───────────────────────┐
+        │                       │                       │
+        ▼                       ▼                       ▼
+┌───────────────┐       ┌───────────────┐       ┌───────────────┐
+│     Game      │       │   Content     │       │  Leaderboard  │
+│  Orchestrator │       │  Generator    │       │   Service     │
+└───────┬───────┘       └───────────────┘       └───────────────┘
+        │
+        ├───────────────────────┬───────────────────────┐
+        │                       │                       │
+        ▼                       ▼                       ▼
+┌───────────────┐       ┌───────────────┐       ┌───────────────┐
+│ Asset Worker  │       │   Template    │       │    Audio      │
+│               │       │   Service     │       │   Generator   │
+└───────────────┘       └───────────────┘       └───────────────┘
+                                │
+        ┌───────────────────────┼───────────────────────┐
+        │                       │                       │
+        ▼                       ▼                       ▼
+┌───────────────┐       ┌───────────────┐       ┌───────────────┐
+│    Aurora     │       │  ElastiCache  │       │   DynamoDB    │
+│  PostgreSQL   │       │    Redis      │       │               │
+└───────────────┘       └───────────────┘       └───────────────┘
+```
 
 ---
 
