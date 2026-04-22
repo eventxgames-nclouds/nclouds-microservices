@@ -5,7 +5,6 @@ This repository contains documentation for the EventXGames microservices archite
 ## Contents
 
 - [MICROSERVICES.md](./MICROSERVICES.md) - Complete service mapping and specifications
-- [services/](./services/) - Individual service documentation
 
 ## Service Overview
 
